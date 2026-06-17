@@ -25,7 +25,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("🗑️ Delete"), KeyboardButton("❓ Help")],
     ],
     resize_keyboard=True,
-    persistent=True
+    is_persistent=True
 )
 
 def load_data():
