@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
     ApplicationBuilder, CommandHandler, MessageHandler,
     CallbackQueryHandler, ContextTypes, ConversationHandler, filters
@@ -16,6 +16,17 @@ logging.basicConfig(level=logging.INFO)
 # Conversation states
 NAME, DESCRIPTION, REASON, ICKS, PHOTO = range(5)
 ADD_ICK_NAME, ADD_ICK_TEXT = range(5, 7)
+
+# Persistent bottom keyboard
+MAIN_KEYBOARD = ReplyKeyboardMarkup(
+    [
+        [KeyboardButton("🗂️ Add a Guy"), KeyboardButton("👀 My List")],
+        [KeyboardButton("🔍 Look Up"), KeyboardButton("🤢 Add an Ick")],
+        [KeyboardButton("🗑️ Delete"), KeyboardButton("❓ Help")],
+    ],
+    resize_keyboard=True,
+    persistent=True
+)
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -33,18 +44,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👻 Welcome to GhostFileBot!\n\n"
         "Your personal vault for remembering why you said no.\n\n"
-        "Commands:\n"
-        "/add — Add a new guy to the file\n"
-        "/list — See all your entries\n"
-        "/lookup — Look up a specific guy\n"
-        "/addick — Add an ick to someone's file\n"
-        "/delete — Remove someone from the file"
+        "Use the buttons below to get started 👇",
+        reply_markup=MAIN_KEYBOARD
     )
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await start(update, context)
+    await update.message.reply_text(
+        "👻 GhostFileBot Help\n\n"
+        "🗂️ Add a Guy — file a new guy\n"
+        "👀 My List — see everyone you've filed\n"
+        "🔍 Look Up — open a specific guy's file\n"
+        "🤢 Add an Ick — add an ick to someone's file\n"
+        "🗑️ Delete — remove someone from the file",
+        reply_markup=MAIN_KEYBOARD
+    )
 
-# ── /add flow ─────────────────────────────────────────────────────────────────
+# ── Add flow ──────────────────────────────────────────────────────────────────
 
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Let's file him 🗂️\n\nWhat's his name?")
@@ -62,27 +77,56 @@ async def add_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_reason"] = update.message.text.strip()
-    await update.message.reply_text(
-        "Any icks? Send them one by one, then type /done when finished.\n"
-        "Or type /skip to skip this part."
-    )
     context.user_data["new_icks"] = []
+    await update.message.reply_text(
+        "Any icks? Send them one by one, then tap Done when finished.\n"
+        "Or tap Skip to skip.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("✅ Done"), KeyboardButton("⏭️ Skip")]],
+            resize_keyboard=True
+        )
+    )
     return ICKS
 
 async def add_ick_item(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_icks"].append(update.message.text.strip())
-    await update.message.reply_text("Added! Send another ick or type /done to continue.")
+    text = update.message.text.strip()
+    if text == "✅ Done":
+        return await add_icks_done(update, context)
+    if text == "⏭️ Skip":
+        return await skip_icks(update, context)
+    context.user_data["new_icks"].append(text)
+    await update.message.reply_text(
+        f"Added! 🤢 Send another ick or tap Done.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("✅ Done"), KeyboardButton("⏭️ Skip")]],
+            resize_keyboard=True
+        )
+    )
     return ICKS
 
 async def add_icks_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Got it 🤢\n\nNow send a photo or screenshot for his file (optional).\n"
-        "Type /skip to skip."
+        "Got it! Now send a photo or screenshot for his file.\nOr tap Skip.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("⏭️ Skip")]],
+            resize_keyboard=True
+        )
+    )
+    return PHOTO
+
+async def skip_icks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["new_icks"] = []
+    await update.message.reply_text(
+        "Now send a photo or screenshot for his file.\nOr tap Skip.",
+        reply_markup=ReplyKeyboardMarkup(
+            [[KeyboardButton("⏭️ Skip")]],
+            resize_keyboard=True
+        )
     )
     return PHOTO
 
 async def add_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo = update.message.photo[-1]  # highest resolution
+    photo = update.message.photo[-1]
     context.user_data["new_photo"] = photo.file_id
     await _save_entry(update, context)
     return ConversationHandler.END
@@ -91,14 +135,6 @@ async def skip_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_photo"] = None
     await _save_entry(update, context)
     return ConversationHandler.END
-
-async def skip_icks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["new_icks"] = []
-    await update.message.reply_text(
-        "Now send a photo or screenshot for his file (optional).\n"
-        "Type /skip to skip."
-    )
-    return PHOTO
 
 async def _save_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -117,14 +153,15 @@ async def _save_entry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     save_data(data)
     await update.message.reply_text(
-        f"✅ {name} has been filed. If he ever comes back, you'll know exactly why you said no 👻"
+        f"✅ {name} has been filed. If he ever comes back, you'll know exactly why you said no 👻",
+        reply_markup=MAIN_KEYBOARD
     )
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Cancelled. Nothing was saved.")
+    await update.message.reply_text("Cancelled. Nothing was saved.", reply_markup=MAIN_KEYBOARD)
     return ConversationHandler.END
 
-# ── /list ─────────────────────────────────────────────────────────────────────
+# ── List ──────────────────────────────────────────────────────────────────────
 
 async def list_entries(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -132,17 +169,17 @@ async def list_entries(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entries = data.get(user_id, {})
 
     if not entries:
-        await update.message.reply_text("Your ghost file is empty. Use /add to file someone 🗂️")
+        await update.message.reply_text("Your ghost file is empty. Tap 🗂️ Add a Guy to file someone!", reply_markup=MAIN_KEYBOARD)
         return
 
     lines = ["👻 Your Ghost File:\n"]
     for i, (_, entry) in enumerate(entries.items(), 1):
         date = entry.get("date", "unknown date")
         lines.append(f"{i}. {entry['name']} — {entry['description']} (filed {date})")
-    lines.append("\nUse /lookup to read the full file on anyone.")
-    await update.message.reply_text("\n".join(lines))
+    lines.append("\nTap 🔍 Look Up to read the full file on anyone.")
+    await update.message.reply_text("\n".join(lines), reply_markup=MAIN_KEYBOARD)
 
-# ── /lookup ───────────────────────────────────────────────────────────────────
+# ── Lookup ────────────────────────────────────────────────────────────────────
 
 async def lookup_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -150,7 +187,7 @@ async def lookup_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entries = data.get(user_id, {})
 
     if not entries:
-        await update.message.reply_text("Your ghost file is empty. Use /add to file someone 🗂️")
+        await update.message.reply_text("Your ghost file is empty. Tap 🗂️ Add a Guy to file someone!", reply_markup=MAIN_KEYBOARD)
         return
 
     keyboard = [
@@ -173,7 +210,7 @@ async def lookup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     entry = entries[key]
     icks = entry.get("icks", [])
-    ick_text = "\n🤢 Icks:\n" + "\n".join(f"  — {ick}" for ick in icks) if icks else ""
+    ick_text = "\n\n🤢 Icks:\n" + "\n".join(f"  — {ick}" for ick in icks) if icks else ""
     date = entry.get("date", "unknown date")
 
     text = (
@@ -191,7 +228,7 @@ async def lookup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.edit_message_text(text)
 
-# ── /addick flow ──────────────────────────────────────────────────────────────
+# ── Add Ick flow ──────────────────────────────────────────────────────────────
 
 async def addick_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -199,7 +236,7 @@ async def addick_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entries = data.get(user_id, {})
 
     if not entries:
-        await update.message.reply_text("Your ghost file is empty. Use /add to file someone first.")
+        await update.message.reply_text("Your ghost file is empty. Add someone first!", reply_markup=MAIN_KEYBOARD)
         return ConversationHandler.END
 
     keyboard = [
@@ -214,7 +251,7 @@ async def addick_name_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     key = query.data.replace("addick:", "")
     context.user_data["ick_target"] = key
-    await query.edit_message_text(f"What's the ick? 🤢")
+    await query.edit_message_text("What's the ick? 🤢")
     return ADD_ICK_TEXT
 
 async def addick_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -229,12 +266,12 @@ async def addick_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data[user_id][key]["icks"].append(ick)
         save_data(data)
         name = data[user_id][key]["name"]
-        await update.message.reply_text(f"🤢 Ick added to {name}'s file!")
+        await update.message.reply_text(f"🤢 Ick added to {name}'s file!", reply_markup=MAIN_KEYBOARD)
     else:
-        await update.message.reply_text("Couldn't find that entry.")
+        await update.message.reply_text("Couldn't find that entry.", reply_markup=MAIN_KEYBOARD)
     return ConversationHandler.END
 
-# ── /delete ───────────────────────────────────────────────────────────────────
+# ── Delete ────────────────────────────────────────────────────────────────────
 
 async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
@@ -242,7 +279,7 @@ async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     entries = data.get(user_id, {})
 
     if not entries:
-        await update.message.reply_text("Your ghost file is empty.")
+        await update.message.reply_text("Your ghost file is empty.", reply_markup=MAIN_KEYBOARD)
         return
 
     keyboard = [
@@ -267,32 +304,51 @@ async def delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data(data)
     await query.edit_message_text(f"✅ {name} has been removed from your ghost file.")
 
+# ── Message router (handles button taps) ─────────────────────────────────────
+
+async def button_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    if text == "🗂️ Add a Guy":
+        return await add_start(update, context)
+    elif text == "👀 My List":
+        await list_entries(update, context)
+    elif text == "🔍 Look Up":
+        await lookup_start(update, context)
+    elif text == "🤢 Add an Ick":
+        return await addick_start(update, context)
+    elif text == "🗑️ Delete":
+        await delete_start(update, context)
+    elif text == "❓ Help":
+        await help_cmd(update, context)
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     add_conv = ConversationHandler(
-        entry_points=[CommandHandler("add", add_start)],
+        entry_points=[
+            CommandHandler("add", add_start),
+            MessageHandler(filters.Regex("^🗂️ Add a Guy$"), add_start),
+        ],
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_name)],
             DESCRIPTION: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_description)],
             REASON: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_reason)],
-            ICKS: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, add_ick_item),
-                CommandHandler("done", add_icks_done),
-                CommandHandler("skip", skip_icks),
-            ],
+            ICKS: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_ick_item)],
             PHOTO: [
                 MessageHandler(filters.PHOTO, add_photo),
-                CommandHandler("skip", skip_photo),
+                MessageHandler(filters.Regex("^⏭️ Skip$"), skip_photo),
             ],
         },
         fallbacks=[CommandHandler("cancel", cancel)]
     )
 
     addick_conv = ConversationHandler(
-        entry_points=[CommandHandler("addick", addick_start)],
+        entry_points=[
+            CommandHandler("addick", addick_start),
+            MessageHandler(filters.Regex("^🤢 Add an Ick$"), addick_start),
+        ],
         states={
             ADD_ICK_NAME: [CallbackQueryHandler(addick_name_callback, pattern="^addick:")],
             ADD_ICK_TEXT: [MessageHandler(filters.TEXT & ~filters.COMMAND, addick_text)],
@@ -309,6 +365,10 @@ def main():
     app.add_handler(addick_conv)
     app.add_handler(CallbackQueryHandler(lookup_callback, pattern="^lookup:"))
     app.add_handler(CallbackQueryHandler(delete_callback, pattern="^delete:"))
+    app.add_handler(MessageHandler(
+        filters.TEXT & ~filters.COMMAND & filters.Regex("^(👀 My List|🔍 Look Up|🗑️ Delete|❓ Help)$"),
+        button_router
+    ))
 
     print("GhostFileBot is running... 👻")
     app.run_polling()
