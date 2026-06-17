@@ -7,16 +7,12 @@ from telegram.ext import (
     CallbackQueryHandler, ContextTypes, ConversationHandler, filters
 )
 
-TOKEN = "8911018421:AAGfWpfblR0DRx2sENX86AH4bOfrLSpbovg"
+TOKEN = os.environ.get("BOT_TOKEN", "YOUR_TOKEN_HERE")
 DATA_FILE = "data.json"
 
 logging.basicConfig(level=logging.INFO)
 
-# Conversation states
 NAME, DESCRIPTION, REASON = range(3)
-LOOKUP_NAME = 3
-
-# ── Data helpers ──────────────────────────────────────────────────────────────
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -28,43 +24,32 @@ def save_data(data):
     with open(DATA_FILE, "w") as f:
         json.dump(data, f, indent=2)
 
-def get_user_entries(user_id: str, data: dict):
-    return data.get(user_id, {})
-
-# ── /start ────────────────────────────────────────────────────────────────────
-
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👻 Welcome to *GhostFileBot*\\!\n\n"
-        "Your personal vault for remembering *why you said no\\.*\n\n"
+        "👻 Welcome to GhostFileBot!\n\n"
+        "Your personal vault for remembering why you said no.\n\n"
         "Commands:\n"
-        "/add \\- Add a new guy to the file\n"
-        "/list \\- See all your entries\n"
-        "/lookup \\- Look up a specific guy\n"
-        "/delete \\- Remove someone from the file\n"
-        "/help \\- Show this menu again",
-        parse_mode="MarkdownV2"
+        "/add - Add a new guy to the file\n"
+        "/list - See all your entries\n"
+        "/lookup - Look up a specific guy\n"
+        "/delete - Remove someone from the file"
     )
-
-# ── /help ─────────────────────────────────────────────────────────────────────
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await start(update, context)
 
-# ── /add flow ─────────────────────────────────────────────────────────────────
-
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Okay, let's file him 🗂️\n\nFirst — what's his *name*?", parse_mode="Markdown")
+    await update.message.reply_text("Let's file him 🗂️\n\nWhat's his name?")
     return NAME
 
 async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_name"] = update.message.text.strip()
-    await update.message.reply_text("Got it. Now give a short *description* — who is he? (e.g. 'guy from the gym', 'coworker', 'ex from 2022')", parse_mode="Markdown")
+    await update.message.reply_text("Got it. Short description — who is he? (e.g. 'guy from the gym', 'ex from 2022')")
     return DESCRIPTION
 
 async def add_description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["new_desc"] = update.message.text.strip()
-    await update.message.reply_text("And the most important part — *why did you say no?*", parse_mode="Markdown")
+    await update.message.reply_text("And why did you say no?")
     return REASON
 
 async def add_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -84,62 +69,50 @@ async def add_reason(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     save_data(data)
 
-    await update.message.reply_text(
-        f"✅ *{name}* has been filed\\.\n\nIf he ever comes back, you'll know exactly why you said no 👻",
-        parse_mode="MarkdownV2"
-    )
+    await update.message.reply_text(f"✅ {name} has been filed. If he ever comes back, you'll know why you said no 👻")
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Cancelled. Nothing was saved.")
     return ConversationHandler.END
 
-# ── /list ─────────────────────────────────────────────────────────────────────
-
 async def list_entries(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     data = load_data()
-    entries = get_user_entries(user_id, data)
+    entries = data.get(user_id, {})
 
     if not entries:
         await update.message.reply_text("Your ghost file is empty. Use /add to file someone 🗂️")
         return
 
-    lines = ["👻 *Your Ghost File:*\n"]
+    lines = ["👻 Your Ghost File:\n"]
     for i, (_, entry) in enumerate(entries.items(), 1):
-        lines.append(f"{i}\\. *{entry['name']}* — _{entry['description']}_")
-
-    lines.append("\nUse /lookup to read the full file on anyone\\.")
-    await update.message.reply_text("\n".join(lines), parse_mode="MarkdownV2")
-
-# ── /lookup flow ──────────────────────────────────────────────────────────────
+        lines.append(f"{i}. {entry['name']} — {entry['description']}")
+    lines.append("\nUse /lookup to read the full file on anyone.")
+    await update.message.reply_text("\n".join(lines))
 
 async def lookup_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     data = load_data()
-    entries = get_user_entries(user_id, data)
+    entries = data.get(user_id, {})
 
     if not entries:
         await update.message.reply_text("Your ghost file is empty. Use /add to file someone 🗂️")
-        return ConversationHandler.END
+        return
 
     keyboard = [
         [InlineKeyboardButton(entry["name"], callback_data=f"lookup:{key}")]
         for key, entry in entries.items()
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Who do you want to look up?", reply_markup=reply_markup)
-    return ConversationHandler.END
+    await update.message.reply_text("Who do you want to look up?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def lookup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = str(query.from_user.id)
     key = query.data.replace("lookup:", "")
-
     data = load_data()
-    entries = get_user_entries(user_id, data)
+    entries = data.get(user_id, {})
 
     if key not in entries:
         await query.edit_message_text("Couldn't find that entry.")
@@ -147,18 +120,15 @@ async def lookup_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     entry = entries[key]
     await query.edit_message_text(
-        f"🗂️ *Ghost File: {entry['name']}*\n\n"
-        f"📌 *Who:* {entry['description']}\n\n"
-        f"🚩 *Why you said no:*\n_{entry['reason']}_",
-        parse_mode="Markdown"
+        f"🗂️ Ghost File: {entry['name']}\n\n"
+        f"📌 Who: {entry['description']}\n\n"
+        f"🚩 Why you said no:\n{entry['reason']}"
     )
-
-# ── /delete flow ──────────────────────────────────────────────────────────────
 
 async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     data = load_data()
-    entries = get_user_entries(user_id, data)
+    entries = data.get(user_id, {})
 
     if not entries:
         await update.message.reply_text("Your ghost file is empty.")
@@ -168,30 +138,23 @@ async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"🗑️ {entry['name']}", callback_data=f"delete:{key}")]
         for key, entry in entries.items()
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Who do you want to remove from the file?", reply_markup=reply_markup)
+    await update.message.reply_text("Who do you want to remove?", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def delete_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user_id = str(query.from_user.id)
     key = query.data.replace("delete:", "")
-
     data = load_data()
-    entries = get_user_entries(user_id, data)
 
-    if key not in entries:
+    if user_id not in data or key not in data[user_id]:
         await query.edit_message_text("Couldn't find that entry.")
         return
 
-    name = entries[key]["name"]
+    name = data[user_id][key]["name"]
     del data[user_id][key]
     save_data(data)
-
-    await query.edit_message_text(f"✅ *{name}* has been removed from your ghost file.", parse_mode="Markdown")
-
-# ── Main ──────────────────────────────────────────────────────────────────────
+    await query.edit_message_text(f"✅ {name} has been removed from your ghost file.")
 
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
@@ -206,18 +169,12 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)]
     )
 
-    lookup_conv = ConversationHandler(
-        entry_points=[CommandHandler("lookup", lookup_start)],
-        states={},
-        fallbacks=[CommandHandler("cancel", cancel)]
-    )
-
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("list", list_entries))
+    app.add_handler(CommandHandler("lookup", lookup_start))
     app.add_handler(CommandHandler("delete", delete_start))
     app.add_handler(add_conv)
-    app.add_handler(lookup_conv)
     app.add_handler(CallbackQueryHandler(lookup_callback, pattern="^lookup:"))
     app.add_handler(CallbackQueryHandler(delete_callback, pattern="^delete:"))
 
